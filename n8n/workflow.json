@@ -1,0 +1,354 @@
+{
+  "name": "Assistente de Investimentos - RPA, n8n e IA",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "a06e212f-57df-4423-8f31-60c3c7ae8072",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        320
+      ],
+      "webhookId": "a06e212f-57df-4423-8f31-60c3c7ae8072"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.body.csv_url || 'https://digitalinnovationone.github.io/dio-lab-assistente-investimentos-rpa-n8n/data.csv' }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "node-http-request",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        420,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse do CSV baixado pelo HTTP Request\nconst rawCsv = $input.first().json.data || $input.first().json.body || $input.first().text || '';\nconst linhas = rawCsv.trim().split(/\\r?\\n/);\nconst cabecalho = linhas[0].split(',').map(c => c.trim().toLowerCase());\nconst investimentos = [];\n\nfor (let i = 1; i < linhas.length; i++) {\n  const linha = linhas[i].trim();\n  if (!linha) continue;\n  const colunas = linha.split(',').map(c => c.trim());\n  const item = {};\n  cabecalho.forEach((col, idx) => {\n    item[col] = colunas[idx] || '';\n  });\n  item.minimo_valor = parseFloat(item.minimo.replace(/[^0-9.]/g, '')) || 0;\n  investimentos.push(item);\n}\n\nreturn [{ json: { investimentos: investimentos } }];"
+      },
+      "id": "node-code-javascript-csv",
+      "name": "Code in JavaScript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "node-merge",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        840,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normaliza e consolida dados vindos do Merge (Clientes do Webhook + Investimentos do CSV)\nconst dados = $input.first().json;\n\nlet clientes = [];\nif (dados.body && Array.isArray(dados.body.clientes)) {\n  clientes = dados.body.clientes;\n} else if (dados.body && Array.isArray(dados.body)) {\n  clientes = dados.body;\n} else if (Array.isArray(dados.clientes)) {\n  clientes = dados.clientes;\n} else if (Array.isArray(dados)) {\n  clientes = dados;\n} else if (dados.body) {\n  clientes = [dados.body];\n}\n\nconst investimentos = dados.investimentos || [];\n\nreturn [{\n  json: {\n    clientes: clientes,\n    investimentos: investimentos,\n    total_clientes: clientes.length,\n    total_investimentos: investimentos.length\n  }\n}];"
+      },
+      "id": "node-code-javascript-1",
+      "name": "Code in JavaScript1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cruza cada cliente com os investimentos compativeis e expande para 10 itens\nconst dados = $input.first().json;\nconst clientes = dados.clientes || [];\nconst investimentos = dados.investimentos || [];\n\nfunction parseSaldo(saldoStr) {\n  if (typeof saldoStr === 'number') return saldoStr;\n  if (!saldoStr) return 0;\n  const limpo = saldoStr.replace(/[^0-9,-]/g, '').replace(/\\./g, '').replace(',', '.');\n  return parseFloat(limpo) || 0;\n}\n\nconst itensSeparados = clientes.map(cliente => {\n  const saldoNum = parseSaldo(cliente.saldo);\n  const perfil = (cliente.perfil || '').trim();\n\n  // Filtra produtos compativeis ao perfil\n  const produtosPerfil = investimentos.filter(inv =>\n    inv.perfil.toLowerCase() === perfil.toLowerCase()\n  );\n\n  // Filtra produtos que cabem no saldo\n  const produtosAcessiveis = produtosPerfil.filter(inv => saldoNum >= (inv.minimo_valor || 0));\n  const recomendados = produtosAcessiveis.length > 0 ? produtosAcessiveis : produtosPerfil;\n\n  const listaFormatada = recomendados.map(p => `• ${p.produto} | Mínimo: R$ ${p.minimo} | Rentabilidade: ${p.rentabilidade}`).join('\\n');\n\n  // Prompt estruturado para o modelo de IA (Message a model)\n  const promptIA = `Você é um consultor financeiro de alto padrão. Crie uma mensagem personalizada, elegante e acolhedora em português para o cliente:\nNome: ${cliente.nome}\nPerfil de Risco: ${perfil}\nSaldo Disponível: ${cliente.saldo}\nProdutos Recomendados:\n${listaFormatada}\n\nInstruções:\n1. Cumprimente pelo primeiro nome.\n2. Explique com simpatia por que essas opções combinam com o perfil ${perfil}.\n3. Apresente os ativos recomendados com clareza.\n4. Finalize com um convite cordialmente profissional para dar início ao aporte.`;\n\n  // Mensagem padronizada de fallback caso o nó de IA nao tenha credencial ativa\n  const mensagemFallback = `Olá, ${cliente.nome.split(' ')[0]}! Notamos que seu perfil de investidor é ${perfil}. Com base no seu saldo disponível de ${cliente.saldo}, recomendamos as seguintes opções:\\n${listaFormatada}\\nConte com nossa assessoria para começar a investir com segurança!`;\n\n  return {\n    json: {\n      ...cliente,\n      saldo_numerico: saldoNum,\n      produtos_recomendados: recomendados,\n      prompt: promptIA,\n      mensagem_fallback: mensagemFallback\n    }\n  };\n});\n\nreturn itensSeparados;"
+      },
+      "id": "node-code-javascript-2",
+      "name": "Code in JavaScript2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "complete",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Você é um consultor financeiro sênior especializado em investimentos."
+            },
+            {
+              "role": "user",
+              "content": "={{ $json.prompt }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "node-message-a-model",
+      "name": "Message a model",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        1460,
+        280
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrai a resposta da IA (ou usa o fallback) e formata os dados para o envio do email\nconst item = $input.item.json;\n\nconst textoGerado = item.message?.content || item.response?.text || item.text || item.mensagem_fallback;\nconst primeiroNome = (item.nome || 'Cliente').split(' ')[0];\n\nreturn {\n  json: {\n    nome: item.nome,\n    email: item.email,\n    perfil: item.perfil,\n    saldo: item.saldo,\n    produtos_recomendados: item.produtos_recomendados,\n    mensagem_final: textoGerado,\n    assunto_email: `Recomendações exclusivas de investimentos para ${primeiroNome}`,\n    corpo_email: textoGerado,\n    enviar_email: Boolean(item.email && item.email.includes('@')),\n    processado_em: new Date().toISOString()\n  }\n};"
+      },
+      "id": "node-code-javascript-3",
+      "name": "Code in JavaScript3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-email",
+              "leftValue": "={{ $json.enviar_email }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if",
+      "name": "If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "={{ $json.assunto_email }}",
+        "message": "={{ $json.corpo_email }}",
+        "options": {}
+      },
+      "id": "node-send-email",
+      "name": "Send a message",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2160,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  sucesso: true,\n  mensagem: 'Clientes processados e recomendacoes geradas com sucesso.',\n  total_clientes: $items().length,\n  resultados: $items().map(i => i.json)\n}) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "node-respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2400,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "2.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "dio-lab-assistente-investimentos-completo"
+  },
+  "tags": [
+    {
+      "name": "DIO"
+    },
+    {
+      "name": "RPA"
+    },
+    {
+      "name": "Investimentos"
+    },
+    {
+      "name": "IA"
+    }
+  ]
+}

@@ -1,0 +1,218 @@
+{
+  "name": "Assistente de Investimentos - n8n com IA Generativa",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "clientes-ia",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Webhook Clientes",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "webhookId": "assistente-investimentos-clientes-ia"
+    },
+    {
+      "parameters": {
+        "url": "https://digitalinnovationone.github.io/dio-lab-assistente-investimentos-rpa-n8n/data.csv",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "f1b2c3d4-0002-4000-8000-000000000002",
+      "name": "Obter Investimentos CSV",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Obter texto do CSV da requisição HTTP anterior\nconst rawCsv = $input.first().json.data || $input.first().json.body || $input.first().text || '';\n\n// 2. Obter clientes recebidos no Webhook\nconst webhookItem = $('Webhook Clientes').first().json;\nlet clientes = [];\nif (webhookItem.body && Array.isArray(webhookItem.body.clientes)) {\n  clientes = webhookItem.body.clientes;\n} else if (webhookItem.body && Array.isArray(webhookItem.body)) {\n  clientes = webhookItem.body;\n} else if (Array.isArray(webhookItem.clientes)) {\n  clientes = webhookItem.clientes;\n} else if (Array.isArray(webhookItem)) {\n  clientes = webhookItem;\n} else if (webhookItem.body && typeof webhookItem.body === 'object') {\n  clientes = [webhookItem.body];\n}\n\n// 3. Parse do CSV\nconst linhasCsv = rawCsv.trim().split(/\\r?\\n/);\nconst cabecalho = linhasCsv[0].split(',').map(c => c.trim().toLowerCase());\nconst catalogo = [];\n\nfor (let i = 1; i < linhasCsv.length; i++) {\n  const linha = linhasCsv[i].trim();\n  if (!linha) continue;\n  const colunas = linha.split(',').map(c => c.trim());\n  const item = {};\n  cabecalho.forEach((col, idx) => {\n    item[col] = colunas[idx] || '';\n  });\n  item.minimo_valor = parseFloat(item.minimo.replace(/[^0-9.]/g, '')) || 0;\n  catalogo.push(item);\n}\n\nfunction converterSaldoParaNumero(saldoStr) {\n  if (typeof saldoStr === 'number') return saldoStr;\n  if (!saldoStr) return 0;\n  const limpo = saldoStr.replace(/[^0-9,-]/g, '').replace(/\\./g, '').replace(',', '.');\n  return parseFloat(limpo) || 0;\n}\n\n// 4. Cruzamento dos dados\nconst clientesProcessados = clientes.map(cliente => {\n  const saldoNum = converterSaldoParaNumero(cliente.saldo);\n  const perfil = (cliente.perfil || '').trim();\n\n  const produtosPerfil = catalogo.filter(inv =>\n    inv.perfil.toLowerCase() === perfil.toLowerCase()\n  );\n\n  const produtosAcessiveis = produtosPerfil.filter(inv => saldoNum >= inv.minimo_valor);\n  const recomendados = produtosAcessiveis.length > 0 ? produtosAcessiveis : produtosPerfil;\n\n  return {\n    nome: cliente.nome,\n    email: cliente.email,\n    saldo: cliente.saldo,\n    perfil: perfil,\n    produtos_recomendados: recomendados.map(p => ({\n      produto: p.produto,\n      minimo: p.minimo,\n      rentabilidade: p.rentabilidade\n    }))\n  };\n});\n\nreturn clientesProcessados.map(c => ({ json: c }));"
+      },
+      "id": "f1b2c3d4-0003-4000-8000-000000000003",
+      "name": "Cruzar Clientes e Investimentos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Você é um consultor financeiro de alto padrão. Crie uma mensagem personalizada, profissional e acolhedora em português para o cliente abaixo:\n\n- Nome: {{ $json.nome }}\n- Perfil de Risco: {{ $json.perfil }}\n- Saldo Disponível: {{ $json.saldo }}\n- Produtos Selecionados com base no perfil e saldo:\n{{ JSON.stringify($json.produtos_recomendados) }}\n\nInstruções:\n1. Cumprimente o cliente chamando-o pelo primeiro nome.\n2. Explique de forma amigável por que essas recomendações foram selecionadas de acordo com o perfil dele.\n3. Apresente os produtos de forma estruturada com rentabilidade e aporte mínimo.\n4. Finalize com um convite educado para tirar dúvidas ou iniciar a aplicação hoje mesmo.",
+        "hasOutputParser": false
+      },
+      "id": "f1b2c3d4-0004-4000-8000-000000000004",
+      "name": "Agente IA Consultor",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-1.5-flash",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "f1b2c3d4-0005-4000-8000-000000000005",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        940,
+        500
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "configure_sua_credencial_gemini",
+          "name": "Google Gemini API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const itens = $input.all();\nconst resultados = itens.map(item => {\n  const dados = item.json;\n  return {\n    nome: dados.nome,\n    email: dados.email,\n    perfil: dados.perfil,\n    saldo: dados.saldo,\n    produtos_recomendados: dados.produtos_recomendados,\n    mensagem_gerada_ia: dados.text || dados.response || dados.output,\n    modelo_ia: \"Google Gemini / LLM\",\n    processado_em: new Date().toISOString()\n  };\n});\n\nreturn {\n  json: {\n    sucesso: true,\n    tipo_processamento: \"IA Generativa (LLM)\",\n    total_clientes: resultados.length,\n    timestamp: new Date().toISOString(),\n    dados: resultados\n  }\n};"
+      },
+      "id": "f1b2c3d4-0006-4000-8000-000000000006",
+      "name": "Consolidar Relatório IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "f1b2c3d4-0007-4000-8000-000000000007",
+      "name": "Resposta Webhook IA",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Clientes": {
+      "main": [
+        [
+          {
+            "node": "Obter Investimentos CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obter Investimentos CSV": {
+      "main": [
+        [
+          {
+            "node": "Cruzar Clientes e Investimentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cruzar Clientes e Investimentos": {
+      "main": [
+        [
+          {
+            "node": "Agente IA Consultor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente IA Consultor",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente IA Consultor": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Relatório IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consolidar Relatório IA": {
+      "main": [
+        [
+          {
+            "node": "Resposta Webhook IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "dio-lab-investimentos-rpa-n8n-ia"
+  },
+  "tags": [
+    {
+      "name": "DIO"
+    },
+    {
+      "name": "IA Generativa"
+    },
+    {
+      "name": "Gemini"
+    }
+  ]
+}
